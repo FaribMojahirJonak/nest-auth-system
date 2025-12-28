@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UserService } from '../user/user.service';
 import { User } from '../user/user.entity';
 import { StringValue } from 'ms';
 import { ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 
 @Injectable()
@@ -12,6 +13,7 @@ export class AuthService {
   constructor(
     private userService: UserService,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) { }
 
   async validateUser(email: string, password: string): Promise<User | null> {
@@ -24,13 +26,21 @@ export class AuthService {
     return user;
   }
 
-  async register(email: string, password: string): Promise<User> {
-    const hashedPassword = await bcrypt.hash(password, 10);
+  async register(email: string, password: string) {
+    const existingUser = await this.userService.findByEmail(email);
+
+    if (existingUser) {
+      throw new ConflictException('Email already registered');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
     return this.userService.create({
       email,
       password: hashedPassword,
     });
   }
+
 
   async generateTokens(user: User) {
     const payload = {
@@ -40,13 +50,13 @@ export class AuthService {
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {
-      secret: process.env.JWT_ACCESS_SECRET as string,
-      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN as StringValue,
+      secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
+      expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') as StringValue,
     });
 
     const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: process.env.JWT_REFRESH_SECRET as string,
-      expiresIn: process.env.JWT_REFRESH_EXPIRES_IN as StringValue,
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+      expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') as StringValue,
     });
 
     return { accessToken, refreshToken };
@@ -67,7 +77,7 @@ export class AuthService {
     // 1️⃣ Verify refresh token signature
     try {
       payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET as string,
+        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       });
     } catch {
       throw new ForbiddenException('Invalid refresh token');
@@ -97,13 +107,37 @@ export class AuthService {
   }
 
   async invalidateRefreshToken(refreshToken: string) {
-  const payload = await this.jwtService.verifyAsync(refreshToken, {
-    secret: process.env.JWT_REFRESH_SECRET as string,
-  });
+    const payload = await this.jwtService.verifyAsync(refreshToken, {
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+    });
 
-  await this.userService.update(payload.sub, {
-    hashedRefreshToken: null,
-  });
-}
+    await this.userService.update(payload.sub, {
+      hashedRefreshToken: null,
+    });
+  }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.userService.findById(userId);
+
+    const passwordMatches = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
+
+    if (!passwordMatches) {
+      throw new ForbiddenException('Invalid credentials');
+    }
+
+    const newHashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await this.userService.update(userId, {
+      password: newHashedPassword,
+      hashedRefreshToken: null, // invalidate all sessions
+    });
+  }
 
 }

@@ -14,6 +14,8 @@ import { AuthGuard } from '@nestjs/passport';
 import { refreshTokenCookieOptions } from './constants';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Logger } from '@nestjs/common';
+import { JwtAuthGuard } from './guards/jwt-auth/jwt-auth.guard';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 
 
@@ -101,4 +103,19 @@ export class AuthController {
 
     return { message: 'Logged out successfully' };
   }
+
+  @Post('change-password')
+@UseGuards(JwtAuthGuard)
+async changePassword(
+  @Req() req,
+  @Body() dto: ChangePasswordDto,
+) {
+  await this.authService.changePassword(
+    req.user.userId,
+    dto.currentPassword,
+    dto.newPassword,
+  );
+
+  return { message: 'Password updated successfully' };
+}
 }
