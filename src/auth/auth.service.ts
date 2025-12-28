@@ -1,20 +1,26 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { UserService } from '../user/user.service';
+import * as crypto from 'crypto';
+import type { StringValue } from 'ms';
+import { MailService } from 'src/mail/mail.service';
 import { User } from '../user/user.entity';
-import { StringValue } from 'ms';
-import { ForbiddenException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-
+import { UserService } from '../user/user.service';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private userService: UserService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
-  ) { }
+    private readonly userService: UserService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly mailService: MailService,
+  ) {}
 
   async validateUser(email: string, password: string): Promise<User | null> {
     const user = await this.userService.findByEmail(email);
@@ -42,6 +48,10 @@ export class AuthService {
   }
 
 
+  private getExpiresIn(key: string, fallback: StringValue): StringValue {
+    return (this.configService.get<string>(key) ?? fallback) as StringValue;
+  }
+
   async generateTokens(user: User) {
     const payload = {
       sub: user.id,
@@ -51,12 +61,12 @@ export class AuthService {
 
     const accessToken = await this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') as StringValue,
+      expiresIn: this.getExpiresIn('JWT_ACCESS_EXPIRES_IN', '15m'),
     });
 
     const refreshToken = await this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') as StringValue,
+      expiresIn: this.getExpiresIn('JWT_REFRESH_EXPIRES_IN', '7d'),
     });
 
     return { accessToken, refreshToken };
@@ -139,5 +149,67 @@ export class AuthService {
       hashedRefreshToken: null, // invalidate all sessions
     });
   }
+
+  async requestPasswordReset(email: string) {
+    const user = await this.userService.findByEmail(email);
+
+    if (!user) {
+      return; // prevent user enumeration
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenHash = await bcrypt.hash(resetToken, 12);
+
+    await this.userService.update(user.id, {
+      passwordResetTokenHash: resetTokenHash,
+      passwordResetTokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    });
+
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
+    const resetLink = `${frontendUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(user.email)}`;
+
+    await this.mailService.sendPasswordReset(user.email, resetLink);
+  }
+
+  async resetPassword(
+    token: string,
+    email: string,
+    newPassword: string,
+  ) {
+    const user = await this.userService.findByEmail(email);
+
+    if (
+      !user ||
+      !user.passwordResetTokenHash ||
+      !user.passwordResetTokenExpiresAt
+    ) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    if (new Date() > user.passwordResetTokenExpiresAt) {
+      throw new BadRequestException(
+        'Reset token has expired. Please request a new one.',
+      );
+    }
+
+    const tokenValid = await bcrypt.compare(
+      token,
+      user.passwordResetTokenHash,
+    );
+
+    if (!tokenValid) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await this.userService.update(user.id, {
+      password: hashedPassword,
+      hashedRefreshToken: null, // invalidate all sessions
+      passwordResetTokenHash: null,
+      passwordResetTokenExpiresAt: null,
+    });
+  }
+
 
 }

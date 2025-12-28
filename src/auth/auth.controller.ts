@@ -6,16 +6,18 @@ import {
   Req,
   Res,
   ForbiddenException,
-  Get,
 } from '@nestjs/common';
 import type { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { AuthGuard } from '@nestjs/passport';
 import { refreshTokenCookieOptions } from './constants';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import { Logger } from '@nestjs/common';
 import { JwtAuthGuard } from './guards/jwt-auth/jwt-auth.guard';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { RegisterDto } from './dto/register.dto';
+import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 
 
@@ -27,12 +29,12 @@ export class AuthController {
   @Post('register')
   @Throttle({ default: { limit: 3, ttl: 60000 * 60 } }) // 3 registrations per hour
   async register(
-    @Req() req,
+    @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     const user = await this.authService.register(
-      req.body.email,
-      req.body.password,
+      dto.email,
+      dto.password,
     );
 
     const { accessToken, refreshToken } =
@@ -95,7 +97,13 @@ export class AuthController {
       try {
         await this.authService.invalidateRefreshToken(refreshToken);
       } catch (error) {
-        this.logger.warn('Logout token invalid or already revoked');
+        // Only log if it's a JWT or auth-related error (expected during logout)
+        if (error instanceof ForbiddenException) {
+          this.logger.warn('Logout: token already invalid or revoked');
+        } else {
+          // Re-throw unexpected errors so global exception filter handles them
+          throw error;
+        }
       }
     }
 
@@ -105,17 +113,35 @@ export class AuthController {
   }
 
   @Post('change-password')
-@UseGuards(JwtAuthGuard)
-async changePassword(
-  @Req() req,
-  @Body() dto: ChangePasswordDto,
-) {
-  await this.authService.changePassword(
-    req.user.userId,
-    dto.currentPassword,
-    dto.newPassword,
-  );
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @Req() req,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    await this.authService.changePassword(
+      req.user.userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
 
-  return { message: 'Password updated successfully' };
-}
+    return { message: 'Password updated successfully' };
+  }
+
+  @Post('forgot-password')
+  @Throttle({ forgotPassword: { limit: 3, ttl: 60000 * 60 } }) // 3 requests per hour
+  async forgotPassword(@Body() dto: RequestPasswordResetDto) {
+    await this.authService.requestPasswordReset(dto.email);
+    return { message: 'If the email exists, a reset link has been sent' };
+  }
+
+  @Post('reset-password')
+  @Throttle({ resetPassword: { limit: 5, ttl: 60000 * 60 } }) // 5 attempts per hour
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(
+      dto.token,
+      dto.email,
+      dto.newPassword,
+    );
+    return { message: 'Password reset successfully' };
+  }
 }

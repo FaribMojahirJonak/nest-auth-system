@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { MailModule } from './mail/mail.module';
 import { User } from './user/user.entity';
 import { envValidationSchema } from './config/env.validation';
 
@@ -44,10 +45,21 @@ import { envValidationSchema } from './config/env.validation';
       ttl: 60000 * 15, // 15 minutes in milliseconds
       limit: 10,
     },
+    {
+      name: 'forgotPassword',
+      ttl: 60000 * 60, // 60 minutes in milliseconds
+      limit: 3,
+    },
+    {
+      name: 'resetPassword',
+      ttl: 60000 * 60, // 60 minutes in milliseconds
+      limit: 5,
+    },
   ],
     }),
 
     AuthModule,
+    MailModule,
   ],
   providers: [
     {

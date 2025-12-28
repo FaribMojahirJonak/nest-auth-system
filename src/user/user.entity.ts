@@ -37,4 +37,10 @@ export class User {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ type: 'varchar', nullable: true })
+  passwordResetTokenHash: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  passwordResetTokenExpiresAt: Date | null;
 }

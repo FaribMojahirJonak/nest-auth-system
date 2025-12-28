@@ -48,4 +48,23 @@ export const envValidationSchema = Joi.object({
       'string.pattern.base':
         'JWT_REFRESH_EXPIRES_IN must look like 7d, 30d',
     }),
+
+  CORS_ORIGIN: Joi.string()
+    .uri()
+    .default('http://localhost:3000')
+    .messages({
+      'string.uri': 'CORS_ORIGIN must be a valid URI',
+    }),
+
+  FRONTEND_URL: Joi.string()
+    .uri()
+    .default('http://localhost:3000')
+    .messages({
+      'string.uri': 'FRONTEND_URL must be a valid URI',
+    }),
+
+  MAIL_HOST: Joi.string().optional().default('localhost'),
+  MAIL_PORT: Joi.number().optional().default(1025),
+  MAIL_USER: Joi.string().optional().default('test'),
+  MAIL_PASS: Joi.string().optional().default('test'),
 });

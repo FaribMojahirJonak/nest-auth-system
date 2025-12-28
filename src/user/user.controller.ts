@@ -6,7 +6,7 @@ import { Roles } from 'src/auth/decorators/roles/roles.decorator';
 import { RolesGuard } from 'src/auth/guards/roles/roles.guard';
 
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('user')
 export class UserController {
     constructor(
@@ -15,7 +15,6 @@ export class UserController {
 
     @Get()
     @Roles('admin')
-    @UseGuards(JwtAuthGuard, RolesGuard)
     async findAll(): Promise<User[]> {
         return this.userService.findAll();
     }
